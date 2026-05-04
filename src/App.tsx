@@ -32,6 +32,29 @@ const VERSES = [
   "Peace I leave with you; my peace I give you. I do not give to you as the world gives. Do not let your hearts be troubled and do not be afraid."
 ];
 
+const CrawlingAnts = () => {
+  return (
+    <div className="w-full max-w-xl mx-auto h-16 relative overflow-hidden mt-8 opacity-40 pointer-events-none">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <motion.div
+          key={i}
+          initial={{ x: -50, y: Math.sin(i) * 5 }}
+          animate={{ x: 600, y: Math.sin(i * 2) * 5 }}
+          transition={{
+            duration: 12 + (i % 3) * 2, // Varies speed slightly
+            repeat: Infinity,
+            delay: i * 1.5,
+            ease: "linear"
+          }}
+          className="absolute top-1/2 -translate-y-1/2 text-[#6F4E37]"
+        >
+          <Bug className="w-4 h-4 rotate-90" />
+        </motion.div>
+      ))}
+    </div>
+  );
+};
+
 export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -49,6 +72,28 @@ export default function App() {
   // Spirit Sync Modal State
   const [showSpiritSync, setShowSpiritSync] = useState(false);
   const [currentVerse, setCurrentVerse] = useState('');
+  const [installPromptEvent, setInstallPromptEvent] = useState<any>(null);
+
+  // Install Prompt event listener
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setInstallPromptEvent(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!installPromptEvent) return;
+    installPromptEvent.prompt();
+    const { outcome } = await installPromptEvent.userChoice;
+    if (outcome === 'accepted') {
+      setInstallPromptEvent(null);
+    }
+  };
 
   // Firebase Error Handler
   const handleFirestoreError = (error: unknown, operationType: string, path: string | null) => {
@@ -140,7 +185,30 @@ export default function App() {
         // Also update local task state to reflect time ticking without hitting firestore every second
         if (activeTaskId) {
            setTasks(prevTasks => 
-             prevTasks.map(t => t.id === activeTaskId ? { ...t, timeSpent: t.timeSpent + 1 } : t)
+             prevTasks.map(t => {
+               if (t.id === activeTaskId) {
+                 const newTimeSpent = t.timeSpent + 1;
+                 
+                 // Notifications check
+                 if ('Notification' in window && Notification.permission === 'granted') {
+                   // When the timer is exactly 60 seconds from ending
+                   if (t.estimatedTime > 60 && newTimeSpent === t.estimatedTime - 60) {
+                     new Notification('Task almost due!', {
+                       body: `You have 1 minute left for "${t.title}"`,
+                     });
+                   }
+                   // When the timer is due 
+                   if (newTimeSpent === t.estimatedTime) {
+                     new Notification('Task Due Tracker', {
+                       body: `Time is up for "${t.title}"!`,
+                     });
+                   }
+                 }
+                 
+                 return { ...t, timeSpent: newTimeSpent };
+               }
+               return t;
+             })
            );
         }
       }, 1000);
@@ -252,6 +320,9 @@ export default function App() {
       if (activeTaskId) await saveTaskTime(activeTaskId);
       triggerSpiritSync();
     } else {
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
       setTimerState('running');
     }
   };
@@ -286,29 +357,40 @@ export default function App() {
     <div className="min-h-screen font-sans flex flex-col items-center py-12 px-4 selection:bg-[#7D9A7A] selection:text-white">
       
       {/* Header */}
-      <header className="mb-10 text-center w-full max-w-xl flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <header className="mb-10 w-full max-w-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-center sm:justify-start">
           <Leaf className="w-8 h-8 text-[#7D9A7A]" />
           <div>
-            <h1 className="text-3xl font-serif text-[#6F4E37] tracking-tight">AntSync</h1>
-            <p className="text-[#8B7E74] text-xs font-medium tracking-widest uppercase">Grow at your own pace</p>
+            <h1 className="text-3xl font-serif text-[#6F4E37] tracking-tight text-center sm:text-left">AntSync</h1>
+            <p className="text-[#8B7E74] text-xs font-medium tracking-widest uppercase text-center sm:text-left">Grow at your own pace</p>
           </div>
         </div>
         
-        {user ? (
-          <div className="flex items-center gap-4 border border-[#E5EFE4] bg-white rounded-full px-4 py-2 shadow-sm">
-            <span className="text-[#8B7E74] text-sm hidden sm:inline-block">
-              {user.email}
-            </span>
-            <button onClick={logout} className="text-[#A8A099] hover:text-[#6F4E37] transition-colors" title="Log out">
-              <LogOut className="w-4 h-4" />
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          {installPromptEvent && (
+            <button 
+              onClick={handleInstallClick} 
+              className="bg-[#D4A373] text-white hover:bg-[#C29367] text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-full transition-colors shadow-sm"
+            >
+              Install App
             </button>
-          </div>
-        ) : (
-          <button onClick={login} className="flex items-center gap-2 bg-[#7D9A7A] hover:bg-[#688265] text-white px-5 py-2.5 rounded-full text-sm font-medium transition-colors shadow-sm">
-             <LogIn className="w-4 h-4" /> Start Growing
-          </button>
-        )}
+          )}
+
+          {user ? (
+            <div className="flex items-center gap-4 border border-[#E5EFE4] bg-white rounded-full px-4 py-2 shadow-sm">
+              <span className="text-[#8B7E74] text-sm hidden sm:inline-block">
+                {user.email}
+              </span>
+              <button onClick={logout} className="text-[#A8A099] hover:text-[#6F4E37] transition-colors" title="Log out">
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <button onClick={login} className="flex items-center gap-2 bg-[#7D9A7A] hover:bg-[#688265] text-white px-5 py-2.5 rounded-full text-sm font-medium transition-colors shadow-sm">
+               <LogIn className="w-4 h-4" /> Start Growing
+            </button>
+          )}
+        </div>
       </header>
 
       {user ? (
@@ -530,7 +612,7 @@ export default function App() {
              <div className="absolute bottom-0 left-0 w-24 h-24 bg-[#E5EFE4] rounded-tr-full opacity-40"></div>
              
              <Leaf className="w-16 h-16 text-[#7D9A7A] mx-auto mb-6" />
-             <h2 className="text-3xl font-serif text-[#6F4E37] mb-4">Digital Sanctuary</h2>
+             <h2 className="text-3xl font-serif text-[#6F4E37] mb-4">AntSync - Beta Application</h2>
              <p className="text-[#8B7E74] mb-8 max-w-md mx-auto leading-relaxed">
                AntSync helps you plant seeds of productivity. Track your time, earn crumbs for your anthill, and sync your spirit with peaceful moments of reflection.
              </p>
@@ -546,6 +628,8 @@ export default function App() {
                 <LogIn className="w-5 h-5" /> Sign in with Google
              </button>
            </div>
+           
+           <CrawlingAnts />
          </main>
       )}
 
@@ -596,6 +680,10 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      <footer className="mt-auto pt-16 pb-4 w-full text-center flex flex-col items-center justify-center opacity-70">
+        <p className="text-xs font-medium tracking-wide text-[#8B7E74]">Coded and Developed by siejeihyung.digital</p>
+        <p className="text-[10px] uppercase tracking-widest text-[#A8A099] mt-1 hover:text-[#7D9A7A] transition-colors">All Rights Reserved</p>
+      </footer>
     </div>
   );
 }
