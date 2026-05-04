@@ -4,22 +4,28 @@ import { getFirestore } from 'firebase/firestore';
 import localConfig from '../firebase-applet-config.json';
 
 // Support both local config file and environment variables for deployment
+const getFirebaseValue = (envKey: string, localValue: string) => {
+  const envValue = import.meta.env[envKey];
+  // If the env value is missing, empty, or a placeholder, use local value
+  if (!envValue || envValue === "" || envValue.includes("YOUR_") || envValue.includes("MY_")) {
+    return localValue;
+  }
+  return envValue;
+};
+
 const getFirebaseConfig = () => {
-  const env = import.meta.env;
-  
-  // Use environment variables if they exist and aren't empty, otherwise fall back to local config
   return {
-    apiKey: env.VITE_FIREBASE_API_KEY || localConfig.apiKey,
-    authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || localConfig.authDomain,
-    projectId: env.VITE_FIREBASE_PROJECT_ID || localConfig.projectId,
-    storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || localConfig.storageBucket,
-    messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || localConfig.messagingSenderId,
-    appId: env.VITE_FIREBASE_APP_ID || localConfig.appId,
+    apiKey: getFirebaseValue('VITE_FIREBASE_API_KEY', localConfig.apiKey),
+    authDomain: getFirebaseValue('VITE_FIREBASE_AUTH_DOMAIN', localConfig.authDomain),
+    projectId: getFirebaseValue('VITE_FIREBASE_PROJECT_ID', localConfig.projectId),
+    storageBucket: getFirebaseValue('VITE_FIREBASE_STORAGE_BUCKET', localConfig.storageBucket),
+    messagingSenderId: getFirebaseValue('VITE_FIREBASE_MESSAGING_SENDER_ID', localConfig.messagingSenderId),
+    appId: getFirebaseValue('VITE_FIREBASE_APP_ID', localConfig.appId),
   };
 };
 
 const firebaseConfig = getFirebaseConfig();
-const databaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || localConfig.firestoreDatabaseId;
+const databaseId = getFirebaseValue('VITE_FIREBASE_DATABASE_ID', localConfig.firestoreDatabaseId);
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, databaseId);
