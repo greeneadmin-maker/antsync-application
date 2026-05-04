@@ -887,9 +887,12 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <footer className="mt-auto pt-16 pb-4 w-full text-center flex flex-col items-center justify-center opacity-70">
-        <p className="text-xs font-medium tracking-wide text-[#8B7E74]">Coded and Developed by siejeihyung.digital</p>
-        <p className="text-[10px] uppercase tracking-widest text-[#A8A099] mt-1 hover:text-[#7D9A7A] transition-colors">All Rights Reserved</p>
+      <footer className="mt-auto pt-8 pb-4 w-full text-center flex flex-col items-center justify-center opacity-70 relative">
+        <CrawlingAnts />
+        <div className="mt-4">
+          <p className="text-xs font-medium tracking-wide text-[#8B7E74]">Coded and Developed by siejeihyung.digital</p>
+          <p className="text-[10px] uppercase tracking-widest text-[#A8A099] mt-1 hover:text-[#7D9A7A] transition-colors">All Rights Reserved</p>
+        </div>
       </footer>
     </div>
   );
