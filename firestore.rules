@@ -1,0 +1,112 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitive Definition
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function incoming() { 
+      return request.resource.data; 
+    }
+    
+    function existing() { 
+      return resource.data; 
+    }
+    
+    function isSignedIn() { 
+      return request.auth != null; 
+    }
+
+    // Phase 2: Blueprint Validations
+    function isValidUser(data) {
+      return data.keys().hasAll(['userId', 'totalFood', 'createdAt', 'updatedAt']) 
+        && data.keys().size() == 4
+        && data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid
+        && data.totalFood is number
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isUpdateValidUser(data) {
+      return data.userId is string && data.userId == request.auth.uid
+        && data.totalFood is number
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['userId', 'title', 'timeSpent', 'isCompleted', 'createdAt', 'updatedAt'])
+        && (!('estimatedTime' in data) || data.estimatedTime is number)
+        && data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid
+        && data.title is string && data.title.size() <= 256 && data.title.size() > 0
+        && data.timeSpent is number
+        && data.isCompleted is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isUpdateValidTask(data) {
+      return data.userId is string && data.userId == request.auth.uid
+        && (!('estimatedTime' in data) || data.estimatedTime is number)
+        && data.title is string && data.title.size() <= 256 && data.title.size() > 0
+        && data.timeSpent is number
+        && data.isCompleted is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow create: if isSignedIn() 
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUser(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && incoming().totalFood == 0;
+        
+      allow update: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isUpdateValidUser(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().userId == existing().userId
+        && incoming().diff(existing()).affectedKeys().hasOnly(['totalFood', 'updatedAt']);
+
+      match /tasks/{taskId} {
+        allow list: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+        allow get: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(taskId);
+        allow create: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(taskId)
+          && request.auth.uid == userId
+          && isValidTask(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && incoming().timeSpent == 0
+          && incoming().isCompleted == false;
+          
+        allow update: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(taskId)
+          && request.auth.uid == userId
+          && isUpdateValidTask(incoming())
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().userId == existing().userId
+          && (
+            (incoming().diff(existing()).affectedKeys().hasOnly(['timeSpent', 'updatedAt'])) ||
+            (incoming().diff(existing()).affectedKeys().hasOnly(['isCompleted', 'timeSpent', 'updatedAt']))
+          );
+      }
+    }
+  }
+}

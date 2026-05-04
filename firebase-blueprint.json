@@ -1,0 +1,41 @@
+{
+  "entities": {
+    "user": {
+      "title": "User",
+      "description": "User profile with their anthill stats.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "totalFood": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "totalFood", "createdAt", "updatedAt"]
+    },
+    "task": {
+      "title": "Task",
+      "description": "A productivity task.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "timeSpent": { "type": "number" },
+        "estimatedTime": { "type": "number" },
+        "isCompleted": { "type": "boolean" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "title", "timeSpent", "isCompleted", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/user" },
+      "description": "User profile documents"
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/task" },
+      "description": "Tasks created by users"
+    }
+  }
+}
