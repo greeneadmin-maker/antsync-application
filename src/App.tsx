@@ -73,9 +73,20 @@ export default function App() {
   const [showSpiritSync, setShowSpiritSync] = useState(false);
   const [currentVerse, setCurrentVerse] = useState('');
   const [installPromptEvent, setInstallPromptEvent] = useState<any>(null);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [showIOSInstall, setShowIOSInstall] = useState(false);
 
   // Install Prompt event listener
   useEffect(() => {
+    // Check if it's iOS
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    setIsIOS(ios);
+
+    // Check if app is already installed
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+    setIsStandalone(standalone);
+
     const handleBeforeInstallPrompt = (e: any) => {
       e.preventDefault();
       setInstallPromptEvent(e);
@@ -87,6 +98,10 @@ export default function App() {
   }, []);
 
   const handleInstallClick = async () => {
+    if (isIOS) {
+      setShowIOSInstall(true);
+      return;
+    }
     if (!installPromptEvent) return;
     installPromptEvent.prompt();
     const { outcome } = await installPromptEvent.userChoice;
@@ -367,7 +382,7 @@ export default function App() {
         </div>
         
         <div className="flex flex-wrap items-center justify-center gap-3">
-          {installPromptEvent && (
+          {(!isStandalone && (installPromptEvent || isIOS)) && (
             <button 
               onClick={handleInstallClick} 
               className="bg-[#D4A373] text-white hover:bg-[#C29367] text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-full transition-colors shadow-sm"
@@ -673,6 +688,67 @@ export default function App() {
                   className="mt-8 px-10 py-4 bg-[#7D9A7A] text-white rounded-full font-medium hover:bg-[#688265] transition-all transform hover:scale-105 active:scale-95 shadow-xl shadow-[#7D9A7A]/20 uppercase tracking-wide text-sm"
                 >
                   Amen
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showIOSInstall && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 sm:p-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setShowIOSInstall(false)}
+          >
+            <motion.div
+              initial={{ y: "100%", opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: "100%", opacity: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl w-full max-w-sm border border-[#E5EFE4] relative sm:mb-0"
+            >
+              <button 
+                onClick={() => setShowIOSInstall(false)}
+                className="absolute top-4 right-4 text-[#A8A099] hover:text-[#4A4A4A] bg-[#F9F8F6] rounded-full p-1.5 transition-colors"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              
+              <div className="flex flex-col items-center text-center space-y-4">
+                <div className="w-16 h-16 bg-[#E5EFE4] rounded-2xl flex items-center justify-center text-[#7D9A7A] mb-2 shadow-inner">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="5"/></svg>
+                </div>
+                
+                <h3 className="text-xl font-serif text-[#6F4E37]">Install AntSync</h3>
+                
+                <div className="text-[#8B7E74] text-sm space-y-4 pt-2">
+                  <p>Install this application on your home screen for quick and easy access when you're on the go.</p>
+                  
+                  <div className="bg-[#F9F8F6] p-4 rounded-2xl border border-[#E5EFE4] text-left">
+                    <ol className="list-decimal list-inside space-y-2 text-[#6F4E37]">
+                      <li className="flex items-center gap-2">
+                        <span>Tap the <strong>Share</strong> button</span>
+                        <svg className="w-5 h-5 text-[#8B7E74] ml-auto shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                      </li>
+                      <li className="flex items-center gap-2 border-t border-[#E5EFE4] pt-2">
+                         <span>Select <strong>Add to Home Screen</strong></span>
+                         <Plus className="w-5 h-5 text-[#8B7E74] ml-auto shrink-0" />
+                      </li>
+                    </ol>
+                  </div>
+                </div>
+                
+                <button
+                  onClick={() => setShowIOSInstall(false)}
+                  className="w-full mt-4 py-3 bg-[#7D9A7A] hover:bg-[#688265] text-white rounded-xl font-medium transition-colors"
+                >
+                  Got it
                 </button>
               </div>
             </motion.div>
