@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Play, Pause, Check, Plus, Leaf, Clock, X, Quote, LogIn, LogOut, Bug } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User as FirebaseUser } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, User as FirebaseUser } from 'firebase/auth';
 import { collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, getDoc, getDocFromServer } from 'firebase/firestore';
 
 // --- DATA ARCHITECTURE ---
@@ -63,6 +63,9 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskTime, setNewTaskTime] = useState('25');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
   
   // Timer State
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
@@ -75,7 +78,7 @@ export default function App() {
   const [installPromptEvent, setInstallPromptEvent] = useState<any>(null);
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
-  const [showIOSInstall, setShowIOSInstall] = useState(false);
+  const [showInstallDialog, setShowInstallDialog] = useState(false);
 
   // Install Prompt event listener
   useEffect(() => {
@@ -98,15 +101,14 @@ export default function App() {
   }, []);
 
   const handleInstallClick = async () => {
-    if (isIOS) {
-      setShowIOSInstall(true);
-      return;
-    }
-    if (!installPromptEvent) return;
-    installPromptEvent.prompt();
-    const { outcome } = await installPromptEvent.userChoice;
-    if (outcome === 'accepted') {
-      setInstallPromptEvent(null);
+    if (installPromptEvent) {
+      installPromptEvent.prompt();
+      const { outcome } = await installPromptEvent.userChoice;
+      if (outcome === 'accepted') {
+        setInstallPromptEvent(null);
+      }
+    } else {
+      setShowInstallDialog(true);
     }
   };
 
@@ -126,9 +128,18 @@ export default function App() {
 
   // Auth and Data Fetching
   useEffect(() => {
+    let unsubUser: (() => void) | null = null;
+    let unsubTasks: (() => void) | null = null;
+
+    const cleanupListeners = () => {
+      if (unsubUser) { unsubUser(); unsubUser = null; }
+      if (unsubTasks) { unsubTasks(); unsubTasks = null; }
+    };
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
+        cleanupListeners(); // ensure previous are cleaned just in case
         // Fetch or create user profile
         try {
           const userRef = doc(db, 'users', currentUser.uid);
@@ -143,7 +154,7 @@ export default function App() {
           }
           
           // Listen to user profile
-          const unsubUser = onSnapshot(userRef, (docSnap) => {
+          unsubUser = onSnapshot(userRef, (docSnap) => {
             if (docSnap.exists()) {
               setUserProfile(docSnap.data() as UserProfile);
             }
@@ -154,7 +165,7 @@ export default function App() {
             collection(db, `users/${currentUser.uid}/tasks`), 
             orderBy('createdAt', 'desc')
           );
-          const unsubTasks = onSnapshot(tasksQuery, (snapshot) => {
+          unsubTasks = onSnapshot(tasksQuery, (snapshot) => {
             const fetchedTasks: Task[] = [];
             snapshot.forEach((doc) => {
               const data = doc.data();
@@ -172,22 +183,22 @@ export default function App() {
           }, (error) => handleFirestoreError(error, 'list', `users/${currentUser.uid}/tasks`));
 
           setLoading(false);
-          return () => {
-            unsubUser();
-            unsubTasks();
-          };
         } catch (error) {
           handleFirestoreError(error, 'get', `users/${currentUser.uid}`);
           setLoading(false);
         }
       } else {
+        cleanupListeners();
         setTasks([]);
         setUserProfile(null);
         setLoading(false);
       }
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      cleanupListeners();
+      unsubscribeAuth();
+    };
   }, []);
 
   // Timer Tick Logic
@@ -243,6 +254,31 @@ export default function App() {
         message = "This domain is not authorized in Firebase. Please add this URL to 'Authorized Domains' in the Firebase Console (Authentication > Settings).";
       } else if (error.code === 'auth/popup-blocked') {
         message = "Sign-in popup was blocked by your browser. Please allow popups for this site.";
+      }
+      setAuthError(message);
+    }
+  };
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    try {
+      if (isSignUp) {
+        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+      } else {
+        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+      }
+    } catch (error: any) {
+      console.error("Auth failed", error);
+      let message = error.message;
+      if (error.code === 'auth/email-already-in-use') {
+         message = 'Email is already in use.';
+      } else if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+         message = 'Invalid email or password.';
+      } else if (error.code === 'auth/wrong-password') {
+         message = 'Incorrect password.';
+      } else if (error.code === 'auth/operation-not-allowed') {
+         message = 'Email/Password sign-in is not enabled. Please enable it in the Firebase Console (Authentication > Sign-in method).';
       }
       setAuthError(message);
     }
@@ -352,12 +388,55 @@ export default function App() {
     triggerSpiritSync();
   };
 
-  const formatTime = (totalSeconds: number) => {
+  const formatTimeLarge = (totalSeconds: number) => {
     const h = Math.floor(totalSeconds / 3600);
     const m = Math.floor((totalSeconds % 3600) / 60);
     const s = totalSeconds % 60;
-    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    
+    if (h > 0) {
+      return (
+        <span className="flex items-baseline justify-center">
+          <span>{h}</span><span className="text-3xl ml-1 mr-3 text-[#A8A099] font-medium tracking-normal">h</span>
+          <span>{m.toString().padStart(2, '0')}</span><span className="text-3xl ml-1 mr-3 text-[#A8A099] font-medium tracking-normal">m</span>
+          <span>{s.toString().padStart(2, '0')}</span><span className="text-3xl ml-1 text-[#A8A099] font-medium tracking-normal">s</span>
+        </span>
+      );
+    }
+    return (
+      <span className="flex items-baseline justify-center">
+        <span>{m.toString().padStart(2, '0')}</span><span className="text-3xl ml-1 mr-3 text-[#A8A099] font-medium tracking-normal">m</span>
+        <span>{s.toString().padStart(2, '0')}</span><span className="text-3xl ml-1 text-[#A8A099] font-medium tracking-normal">s</span>
+      </span>
+    );
+  };
+
+  const formatTimeSmall = (totalSeconds: number) => {
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    
+    if (h > 0) {
+      return (
+        <span className="inline-flex items-baseline">
+          <span>{h}</span><span className="text-[10px] ml-0.5 mr-1 font-sans text-[#A8A099] tracking-normal">h</span>
+          <span>{m}</span><span className="text-[10px] ml-0.5 mr-1 font-sans text-[#A8A099] tracking-normal">m</span>
+          <span>{s}</span><span className="text-[10px] ml-0.5 font-sans text-[#A8A099] tracking-normal">s</span>
+        </span>
+      );
+    }
+    if (m > 0) {
+      return (
+        <span className="inline-flex items-baseline">
+          <span>{m}</span><span className="text-[10px] ml-0.5 mr-1 font-sans text-[#A8A099] tracking-normal">m</span>
+          <span>{s}</span><span className="text-[10px] ml-0.5 font-sans text-[#A8A099] tracking-normal">s</span>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-baseline">
+        <span>{s}</span><span className="text-[10px] ml-0.5 font-sans text-[#A8A099] tracking-normal">s</span>
+      </span>
+    );
   };
 
   if (loading) {
@@ -382,7 +461,7 @@ export default function App() {
         </div>
         
         <div className="flex flex-wrap items-center justify-center gap-3">
-          {(!isStandalone && (installPromptEvent || isIOS)) && (
+          {!isStandalone && (
             <button 
               onClick={handleInstallClick} 
               className="bg-[#D4A373] text-white hover:bg-[#C29367] text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-full transition-colors shadow-sm"
@@ -428,12 +507,14 @@ export default function App() {
               <div className="text-6xl font-sans font-semibold text-[#4A4A4A] tracking-tight mb-6">
                 {activeTask.estimatedTime > 0 ? (
                   activeTask.timeSpent > activeTask.estimatedTime ? (
-                    <span className="text-[#D4A373]">+{formatTime(activeTask.timeSpent - activeTask.estimatedTime)}</span>
+                    <span className="text-[#D4A373] flex items-center justify-center">
+                      <span className="mr-1 inline-block pb-4">+</span>{formatTimeLarge(activeTask.timeSpent - activeTask.estimatedTime)}
+                    </span>
                   ) : (
-                    formatTime(activeTask.estimatedTime - activeTask.timeSpent)
+                    formatTimeLarge(activeTask.estimatedTime - activeTask.timeSpent)
                   )
                 ) : (
-                  formatTime(activeTask.timeSpent)
+                  formatTimeLarge(activeTask.timeSpent)
                 )}
               </div>
               
@@ -574,8 +655,8 @@ export default function App() {
                           <span className={`font-medium ${activeTaskId === task.id ? 'text-[#6F4E37]' : 'text-[#4A4A4A]'}`}>
                             {task.title}
                           </span>
-                          <span className="text-xs text-[#A8A099] font-mono mt-1">
-                            {formatTime(task.timeSpent)} {task.estimatedTime > 0 && `/ ${formatTime(task.estimatedTime)}`} spent
+                          <span className="text-xs text-[#A8A099] font-mono mt-1 inline-flex items-center gap-1">
+                            {formatTimeSmall(task.timeSpent)} {task.estimatedTime > 0 && <><span className="mx-0.5">/</span> {formatTimeSmall(task.estimatedTime)}</>} <span className="ml-1 tracking-wider uppercase text-[9px]">spent</span>
                           </span>
                         </div>
                         {activeTaskId !== task.id && (
@@ -609,7 +690,7 @@ export default function App() {
                       <span className="line-through text-[#8B7E74]">{task.title}</span>
                       <div className="flex items-center gap-3">
                          <span className="text-[10px] text-[#A8A099] uppercase tracking-widest">{Math.max(0, Math.ceil(task.timeSpent / 60))} crumbs</span>
-                         <span className="text-xs text-[#A8A099] font-mono">{formatTime(task.timeSpent)}</span>
+                         <span className="text-xs text-[#A8A099] font-mono inline-flex items-center">{formatTimeSmall(task.timeSpent)}</span>
                       </div>
                     </li>
                   ))}
@@ -621,27 +702,70 @@ export default function App() {
 
       </main>
       ) : (
-         <main className="w-full max-w-xl text-center py-20">
-           <div className="bg-white p-12 rounded-3xl shadow-xl border border-[#E5EFE4] relative overflow-hidden">
+         <main className="w-full max-w-xl text-center py-10 px-4">
+           <div className="bg-white p-8 sm:p-12 rounded-3xl shadow-xl border border-[#E5EFE4] relative overflow-hidden">
              <div className="absolute top-0 right-0 w-32 h-32 bg-[#FDF4E3] rounded-bl-full opacity-40"></div>
              <div className="absolute bottom-0 left-0 w-24 h-24 bg-[#E5EFE4] rounded-tr-full opacity-40"></div>
              
-             <Leaf className="w-16 h-16 text-[#7D9A7A] mx-auto mb-6" />
-             <h2 className="text-3xl font-serif text-[#6F4E37] mb-4">AntSync - Beta Application</h2>
-             <p className="text-[#8B7E74] mb-8 max-w-md mx-auto leading-relaxed">
+             <Leaf className="w-16 h-16 text-[#7D9A7A] mx-auto mb-6 relative z-10" />
+             <h2 className="text-3xl font-serif text-[#6F4E37] mb-4 relative z-10">AntSync - Beta Application</h2>
+             <p className="text-[#8B7E74] mb-8 max-w-sm mx-auto leading-relaxed relative z-10">
                AntSync helps you plant seeds of productivity. Track your time, earn crumbs for your anthill, and sync your spirit with peaceful moments of reflection.
              </p>
              
              {authError && (
-               <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-sm">
+               <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-sm relative z-10">
                  <p className="font-semibold mb-1">Sign-in Error:</p>
                  {authError}
                </div>
              )}
 
-             <button onClick={login} className="bg-[#6F4E37] hover:bg-[#5A3F2C] text-white px-8 py-3 rounded-full font-medium transition-all shadow-lg transform hover:-translate-y-0.5 inline-flex items-center gap-2">
-                <LogIn className="w-5 h-5" /> Sign in with Google
-             </button>
+             <form onSubmit={handleEmailAuth} className="flex flex-col gap-4 relative z-10 max-w-xs mx-auto">
+               <input
+                 type="email"
+                 placeholder="Email Address"
+                 value={authEmail}
+                 onChange={(e) => setAuthEmail(e.target.value)}
+                 required
+                 className="w-full bg-[#F9F8F6] border border-[#E5EFE4] text-[#6F4E37] px-4 py-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#7D9A7A] focus:border-transparent transition-all placeholder:text-[#A8A099]"
+               />
+               <input
+                 type="password"
+                 placeholder="Password"
+                 value={authPassword}
+                 onChange={(e) => setAuthPassword(e.target.value)}
+                 required
+                 minLength={6}
+                 className="w-full bg-[#F9F8F6] border border-[#E5EFE4] text-[#6F4E37] px-4 py-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#7D9A7A] focus:border-transparent transition-all placeholder:text-[#A8A099]"
+               />
+               
+               <button type="submit" className="w-full bg-[#7D9A7A] hover:bg-[#688265] text-white px-8 py-3 rounded-2xl font-medium transition-all shadow-lg transform hover:-translate-y-0.5 inline-flex items-center justify-center gap-2 mt-2">
+                  <LogIn className="w-5 h-5" /> {isSignUp ? 'Sign Up' : 'Log In'}
+               </button>
+             </form>
+
+             <div className="mt-8 relative z-10 flex flex-col items-center gap-4">
+                <button 
+                 type="button"
+                 onClick={() => {
+                   setIsSignUp(!isSignUp);
+                   setAuthError(null);
+                 }}
+                 className="text-sm font-medium tracking-wide text-[#8B7E74] hover:text-[#7D9A7A] transition-colors"
+                >
+                  {isSignUp ? 'Already have an account? Log In' : "Don't have an account? Sign Up"}
+                </button>
+
+                <div className="flex items-center w-full max-w-xs mx-auto my-2 opacity-50">
+                  <div className="flex-1 h-px bg-[#E5EFE4]"></div>
+                  <span className="px-2 text-xs font-medium text-[#A8A099] uppercase tracking-wider">or</span>
+                  <div className="flex-1 h-px bg-[#E5EFE4]"></div>
+                </div>
+
+                <button onClick={login} type="button" className="bg-white border text-sm border-[#E5EFE4] hover:bg-[#F9F8F6] text-[#6F4E37] px-8 py-2.5 rounded-full font-medium transition-all inline-flex items-center gap-2 shadow-sm">
+                   Continue with Google
+                </button>
+             </div>
            </div>
            
            <CrawlingAnts />
@@ -696,13 +820,13 @@ export default function App() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showIOSInstall && (
+        {showInstallDialog && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 sm:p-0 bg-black/40 backdrop-blur-sm"
-            onClick={() => setShowIOSInstall(false)}
+            onClick={() => setShowInstallDialog(false)}
           >
             <motion.div
               initial={{ y: "100%", opacity: 0 }}
@@ -713,7 +837,7 @@ export default function App() {
               className="bg-white rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl w-full max-w-sm border border-[#E5EFE4] relative sm:mb-0"
             >
               <button 
-                onClick={() => setShowIOSInstall(false)}
+                onClick={() => setShowInstallDialog(false)}
                 className="absolute top-4 right-4 text-[#A8A099] hover:text-[#4A4A4A] bg-[#F9F8F6] rounded-full p-1.5 transition-colors"
                 title="Close"
               >
@@ -730,22 +854,29 @@ export default function App() {
                 <div className="text-[#8B7E74] text-sm space-y-4 pt-2">
                   <p>Install this application on your home screen for quick and easy access when you're on the go.</p>
                   
-                  <div className="bg-[#F9F8F6] p-4 rounded-2xl border border-[#E5EFE4] text-left">
-                    <ol className="list-decimal list-inside space-y-2 text-[#6F4E37]">
-                      <li className="flex items-center gap-2">
-                        <span>Tap the <strong>Share</strong> button</span>
-                        <svg className="w-5 h-5 text-[#8B7E74] ml-auto shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                      </li>
-                      <li className="flex items-center gap-2 border-t border-[#E5EFE4] pt-2">
-                         <span>Select <strong>Add to Home Screen</strong></span>
-                         <Plus className="w-5 h-5 text-[#8B7E74] ml-auto shrink-0" />
-                      </li>
-                    </ol>
-                  </div>
+                  {isIOS ? (
+                    <div className="bg-[#F9F8F6] p-4 rounded-2xl border border-[#E5EFE4] text-left">
+                      <ol className="list-decimal list-inside space-y-2 text-[#6F4E37]">
+                        <li className="flex items-center gap-2">
+                          <span>Tap the <strong>Share</strong> button</span>
+                          <svg className="w-5 h-5 text-[#8B7E74] ml-auto shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                        </li>
+                        <li className="flex items-center gap-2 border-t border-[#E5EFE4] pt-2">
+                           <span>Select <strong>Add to Home Screen</strong></span>
+                           <Plus className="w-5 h-5 text-[#8B7E74] ml-auto shrink-0" />
+                        </li>
+                      </ol>
+                    </div>
+                  ) : (
+                    <div className="bg-[#F9F8F6] p-4 rounded-2xl border border-[#E5EFE4] text-left space-y-3 text-[#6F4E37]">
+                      <p>1. Ensure you are viewing this app in a <strong>new browser tab</strong> (not inside a preview window).</p>
+                      <p className="border-t border-[#E5EFE4] pt-2">2. Tap your browser's menu (⋮) and select <strong>Install app</strong> or <strong>Add to Home screen</strong>.</p>
+                    </div>
+                  )}
                 </div>
                 
                 <button
-                  onClick={() => setShowIOSInstall(false)}
+                  onClick={() => setShowInstallDialog(false)}
                   className="w-full mt-4 py-3 bg-[#7D9A7A] hover:bg-[#688265] text-white rounded-xl font-medium transition-colors"
                 >
                   Got it
