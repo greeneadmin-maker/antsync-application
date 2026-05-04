@@ -37,6 +37,7 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskTime, setNewTaskTime] = useState('25');
   
@@ -148,11 +149,19 @@ export default function App() {
   }, [timerState, activeTaskId]);
 
   const login = async () => {
+    setAuthError(null);
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login failed", error);
+      let message = error.message;
+      if (error.code === 'auth/unauthorized-domain') {
+        message = "This domain is not authorized in Firebase. Please add this URL to 'Authorized Domains' in the Firebase Console (Authentication > Settings).";
+      } else if (error.code === 'auth/popup-blocked') {
+        message = "Sign-in popup was blocked by your browser. Please allow popups for this site.";
+      }
+      setAuthError(message);
     }
   };
 
@@ -525,6 +534,14 @@ export default function App() {
              <p className="text-[#8B7E74] mb-8 max-w-md mx-auto leading-relaxed">
                AntSync helps you plant seeds of productivity. Track your time, earn crumbs for your anthill, and sync your spirit with peaceful moments of reflection.
              </p>
+             
+             {authError && (
+               <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-sm">
+                 <p className="font-semibold mb-1">Sign-in Error:</p>
+                 {authError}
+               </div>
+             )}
+
              <button onClick={login} className="bg-[#6F4E37] hover:bg-[#5A3F2C] text-white px-8 py-3 rounded-full font-medium transition-all shadow-lg transform hover:-translate-y-0.5 inline-flex items-center gap-2">
                 <LogIn className="w-5 h-5" /> Sign in with Google
              </button>
