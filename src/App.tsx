@@ -11,6 +11,7 @@ interface Task {
   id: string;
   userId: string;
   title: string;
+  tags?: string[];
   timeSpent: number; // in seconds
   estimatedTime: number; // in seconds
   isCompleted: boolean;
@@ -21,6 +22,11 @@ interface Task {
 interface UserProfile {
   userId: string;
   totalFood: number;
+  leaves: number;
+  streak: number;
+  lastTaskDate?: string;
+  unlockedThemes: string[];
+  currentTheme: string;
 }
 
 const VERSES = [
@@ -67,6 +73,8 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
+  const [newTaskTags, setNewTaskTags] = useState('');
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   
   // Timer State
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
@@ -112,6 +120,42 @@ export default function App() {
   const [canvaEmail, setCanvaEmail] = useState('');
   const [submittingReward, setSubmittingReward] = useState(false);
   const [rewardSuccess, setRewardSuccess] = useState(false);
+
+  // Shop State
+  const [showShop, setShowShop] = useState(false);
+
+  const THEMES = [
+    { id: 'light', name: 'Original', cost: 0, color: 'bg-[#FDF4E3]' },
+    { id: 'fire-ant', name: 'Fire Ant Red', cost: 50, color: 'bg-[#FFEEEE]' },
+    { id: 'midnight', name: 'Midnight Termite', cost: 100, color: 'bg-[#1A1A1A]' },
+    { id: 'jungle', name: 'Jungle Green', cost: 150, color: 'bg-[#EAF3EA]' },
+  ];
+
+  const handleUnlockTheme = async (themeId: string, cost: number) => {
+    if (!user || !userProfile) return;
+    try {
+      if (userProfile.unlockedThemes?.includes(themeId)) {
+        // Just equip
+        await updateDoc(doc(db, 'users', user.uid), {
+          currentTheme: themeId,
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        if (userProfile.leaves >= cost) {
+          await updateDoc(doc(db, 'users', user.uid), {
+            leaves: userProfile.leaves - cost,
+            unlockedThemes: [...(userProfile.unlockedThemes || []), themeId],
+            currentTheme: themeId,
+            updatedAt: serverTimestamp()
+          });
+        } else {
+          alert('Not enough leaves! Complete more tasks to earn leaves.');
+        }
+      }
+    } catch (error) {
+      handleFirestoreError(error, 'update', `users/${user.uid}`);
+    }
+  };
 
   // Install Prompt event listener
   useEffect(() => {
@@ -247,6 +291,10 @@ export default function App() {
             await setDoc(userRef, {
               userId: currentUser.uid,
               totalFood: 0,
+              leaves: 0,
+              streak: 0,
+              unlockedThemes: ['light'],
+              currentTheme: 'light',
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp()
             });
@@ -272,6 +320,7 @@ export default function App() {
                 id: doc.id,
                 userId: data.userId,
                 title: data.title,
+                tags: data.tags || [],
                 timeSpent: data.timeSpent || 0,
                 estimatedTime: data.estimatedTime || 0,
                 isCompleted: data.isCompleted,
@@ -396,10 +445,18 @@ export default function App() {
     e.preventDefault();
     if (!newTaskTitle.trim() || !user) return;
     
+    // Parse tags: split by comma, trim, filter out empty strings
+    const tagsArray = newTaskTags
+      .split(',')
+      .map(tag => tag.trim().toLowerCase())
+      .filter(tag => tag !== '' && tag.length <= 32)
+      .slice(0, 5); // Limit to 5 tags
+
     const newTaskId = crypto.randomUUID();
     const taskData = {
       userId: user.uid,
       title: newTaskTitle.trim(),
+      tags: tagsArray,
       timeSpent: 0,
       estimatedTime: parseInt(newTaskTime, 10) * 60 || 1500, // default 25 min
       isCompleted: false,
@@ -410,6 +467,7 @@ export default function App() {
     try {
       await setDoc(doc(db, `users/${user.uid}/tasks`, newTaskId), taskData);
       setNewTaskTitle('');
+      setNewTaskTags('');
     } catch (error) {
       handleFirestoreError(error, 'create', `users/${user.uid}/tasks/${newTaskId}`);
     }
@@ -427,9 +485,36 @@ export default function App() {
          const userRef = doc(db, 'users', user.uid);
          const currentUserSnap = await getDoc(userRef);
          if (currentUserSnap.exists()) {
-           const currentFood = currentUserSnap.data().totalFood || 0;
+           const data = currentUserSnap.data();
+           const currentFood = data.totalFood || 0;
+           const currentLeaves = data.leaves || 0;
+           let currentStreak = data.streak || 0;
+           let lastDate = data.lastTaskDate || null;
+           
+           const today = new Date();
+           const todayStr = today.toISOString().split('T')[0];
+           
+           if (lastDate !== todayStr) {
+             if (lastDate) {
+               const yesterday = new Date();
+               yesterday.setDate(yesterday.getDate() - 1);
+               const yesterdayStr = yesterday.toISOString().split('T')[0];
+               if (lastDate === yesterdayStr) {
+                 currentStreak += 1;
+               } else {
+                 currentStreak = 1; // broken streak
+               }
+             } else {
+               currentStreak = 1;
+             }
+             lastDate = todayStr;
+           }
+
            await updateDoc(userRef, {
              totalFood: currentFood + minutesSpent,
+             leaves: currentLeaves + 5, // 5 leaves per completed task
+             streak: currentStreak,
+             lastTaskDate: lastDate,
              updatedAt: serverTimestamp()
            });
          }
@@ -543,8 +628,16 @@ export default function App() {
   };
 
   const activeTask = tasks.find(t => t.id === activeTaskId);
-  const pendingTasks = tasks.filter(t => !t.isCompleted);
-  const completedTasks = tasks.filter(t => t.isCompleted);
+  
+  // Tag processing
+  const allTags = Array.from(new Set(tasks.flatMap(t => t.tags || []))).sort();
+  
+  const filteredTasks = selectedTag 
+    ? tasks.filter(t => t.tags?.includes(selectedTag))
+    : tasks;
+
+  const pendingTasks = filteredTasks.filter(t => !t.isCompleted);
+  const completedTasks = filteredTasks.filter(t => t.isCompleted);
 
   const getColonyRank = (crumbs: number) => {
     if (crumbs < 50) return 'Lone Forager';
@@ -572,12 +665,15 @@ export default function App() {
       .reduce((acc, task) => acc + Math.max(0, Math.ceil(task.timeSpent / 60)), 0);
   };
 
+  const currentThemeConfig = THEMES.find(t => t.id === userProfile?.currentTheme) || THEMES[0];
+  const bgClass = currentThemeConfig.color;
+
   if (loading) {
-     return <div className="min-h-screen flex items-center justify-center bg-[#F9F8F6] text-[#7D9A7A]"><Leaf className="w-8 h-8 animate-pulse" /></div>;
+     return <div className={`min-h-screen flex items-center justify-center ${bgClass} text-[#7D9A7A]`}><Leaf className="w-8 h-8 animate-pulse" /></div>;
   }
 
   return (
-    <div className="min-h-screen font-sans flex flex-col items-center py-12 px-4 selection:bg-[#7D9A7A] selection:text-white">
+    <div className={`min-h-screen font-sans flex flex-col items-center py-12 px-4 selection:bg-[#7D9A7A] selection:text-white transition-colors duration-500 ${bgClass}`}>
       
       {/* Header */}
       {!isZenMode && (
@@ -622,8 +718,15 @@ export default function App() {
           {user ? (
             <div className="flex items-center gap-2 border border-[#E5EFE4] bg-white rounded-full p-2 shadow-sm">
               <button 
+                onClick={() => setShowShop(true)}
+                className="text-[#6F4E37] hover:text-[#7D9A7A] font-bold text-xs uppercase tracking-wider px-3 border-r border-[#E5EFE4] flex items-center gap-1 transition-colors"
+                title="Shop"
+              >
+                Shop 🍃
+              </button>
+              <button 
                 onClick={logout} 
-                className="text-[#A8A099] hover:text-red-500 transition-colors p-1" 
+                className="text-[#A8A099] hover:text-red-500 transition-colors p-1 ml-1" 
                 title="Log out"
               >
                 <LogOut className="w-4 h-4" />
@@ -762,20 +865,17 @@ export default function App() {
                 </div>
                 
                 <div className="flex gap-4 w-full sm:w-auto">
-                  <div className="flex-1 sm:flex-none text-center bg-[#5A3F2C] p-4 rounded-2xl border border-[#7A5A43] min-w-[100px]">
-                     <div className="text-3xl font-serif text-[#FDF4E3] mb-1">{userProfile.totalFood}</div>
-                     <div className="text-[10px] uppercase font-bold text-[#D4AA7D] tracking-widest">Total Crumbs</div>
+                  <div className="flex-1 sm:flex-none text-center bg-[#5A3F2C] p-4 rounded-2xl border border-[#7A5A43] min-w-[80px]">
+                     <div className="text-2xl font-serif text-[#FDF4E3] mb-1">{userProfile.totalFood}</div>
+                     <div className="text-[10px] uppercase font-bold text-[#D4AA7D] tracking-widest">Crumbs</div>
                   </div>
-                  <div className="flex-1 sm:flex-none text-center bg-[#5A3F2C]/50 p-4 rounded-2xl border border-[#7A5A43]/50 min-w-[100px] relative overflow-hidden">
-                     {/* Daily progress background fill */}
-                     <div 
-                       className="absolute bottom-0 left-0 w-full bg-[#7D9A7A]/20 transition-all duration-1000 ease-out"
-                       style={{ height: `${Math.min(100, (getDailyCrumbs() / 50) * 100)}%` }}
-                     />
-                     <div className="relative z-10">
-                       <div className="text-3xl font-serif text-[#FDF4E3] mb-1">{getDailyCrumbs()}</div>
-                       <div className="text-[10px] uppercase font-bold text-[#D4AA7D] tracking-widest">Today's Crumbs</div>
-                     </div>
+                  <div className="flex-1 sm:flex-none flex flex-col justify-center text-center bg-[#5A3F2C] p-4 rounded-2xl border border-[#7A5A43] min-w-[80px]">
+                     <div className="text-2xl font-serif text-[#FDF4E3] mb-1 flex items-center justify-center gap-1">{userProfile.leaves || 0} <span className="text-base text-green-400">🍃</span></div>
+                     <div className="text-[10px] uppercase font-bold text-[#D4AA7D] tracking-widest">Leaves</div>
+                  </div>
+                  <div className="flex-1 sm:flex-none flex flex-col justify-center text-center bg-[#5A3F2C] p-4 rounded-2xl border border-[#7A5A43] min-w-[80px]">
+                     <div className="text-2xl font-serif text-[#FDF4E3] mb-1 flex items-center justify-center gap-1">{userProfile.streak || 0} <span className="text-base text-orange-400">🔥</span></div>
+                     <div className="text-[10px] uppercase font-bold text-[#D4AA7D] tracking-widest">Streak</div>
                   </div>
                 </div>
              </div>
@@ -797,33 +897,78 @@ export default function App() {
 
         {/* The Garden Dashboard */}
         <div className="bg-white/80 backdrop-blur-sm rounded-3xl p-6 md:p-8 shadow-[0_8px_30px_rgb(0,0,0,0.02)] border border-white/50">
-          <form onSubmit={handlePlantSeed} className="flex gap-3 mb-8 flex-wrap sm:flex-nowrap">
-            <input
-              type="text"
-              placeholder="What seed will you plant today?"
-              value={newTaskTitle}
-              onChange={(e) => setNewTaskTitle(e.target.value)}
-              className="flex-1 min-w-[200px] bg-[#F9F8F6] border-none rounded-2xl px-6 py-4 focus:ring-2 focus:ring-[#7D9A7A]/30 outline-none text-[#4A4A4A] placeholder:text-[#A8A099] transition-all shadow-inner"
-            />
-            <div className="flex gap-3">
+          <form onSubmit={handlePlantSeed} className="flex flex-col gap-4 mb-8">
+            <div className="flex gap-3 flex-wrap sm:flex-nowrap">
               <input
-                type="number"
-                min="1"
-                placeholder="25"
-                value={newTaskTime}
-                onChange={(e) => setNewTaskTime(e.target.value)}
-                className="w-20 bg-[#F9F8F6] border-none rounded-2xl px-4 py-4 focus:ring-2 focus:ring-[#7D9A7A]/30 outline-none text-[#4A4A4A] text-center transition-all shadow-inner"
-                title="Estimated time in minutes"
+                type="text"
+                placeholder="What seed will you plant today?"
+                value={newTaskTitle}
+                onChange={(e) => setNewTaskTitle(e.target.value)}
+                className="flex-1 min-w-[200px] bg-[#F9F8F6] border-none rounded-2xl px-6 py-4 focus:ring-2 focus:ring-[#7D9A7A]/30 outline-none text-[#4A4A4A] placeholder:text-[#A8A099] transition-all shadow-inner"
               />
-              <button
-                type="submit"
-                disabled={!newTaskTitle.trim()}
-                className="bg-[#6F4E37] hover:bg-[#5A3F2C] text-white rounded-2xl px-6 flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
-              >
-                <Plus className="w-5 h-5" />
-              </button>
+              <div className="flex gap-3">
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="25"
+                  value={newTaskTime}
+                  onChange={(e) => setNewTaskTime(e.target.value)}
+                  className="w-20 bg-[#F9F8F6] border-none rounded-2xl px-4 py-4 focus:ring-2 focus:ring-[#7D9A7A]/30 outline-none text-[#4A4A4A] text-center transition-all shadow-inner"
+                  title="Estimated time in minutes"
+                />
+                <button
+                  type="submit"
+                  disabled={!newTaskTitle.trim()}
+                  className="bg-[#6F4E37] hover:bg-[#5A3F2C] text-white rounded-2xl px-6 flex items-center justify-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                >
+                  <Plus className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#A8A099]">
+                  <MessageSquare className="w-4 h-4" />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Add tags (comma separated, max 5)..."
+                  value={newTaskTags}
+                  onChange={(e) => setNewTaskTags(e.target.value)}
+                  className="w-full bg-[#F9F8F6] border-none rounded-xl pl-11 pr-6 py-2.5 focus:ring-2 focus:ring-[#7D9A7A]/30 outline-none text-xs text-[#4A4A4A] placeholder:text-[#A8A099] transition-all shadow-inner"
+                />
+              </div>
             </div>
           </form>
+
+          {allTags.length > 0 && (
+            <div className="flex items-center gap-2 mb-6 overflow-x-auto pb-2 custom-scrollbar">
+              <button
+                onClick={() => setSelectedTag(null)}
+                className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
+                  selectedTag === null 
+                    ? 'bg-[#7D9A7A] text-white shadow-sm' 
+                    : 'bg-[#F9F8F6] text-[#A8A099] hover:bg-[#E5EFE4] hover:text-[#7D9A7A]'
+                }`}
+              >
+                All
+              </button>
+              {allTags.map(tag => (
+                <button
+                  key={tag}
+                  onClick={() => setSelectedTag(selectedTag === tag ? null : tag)}
+                  className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
+                    selectedTag === tag 
+                      ? 'bg-[#D4A373] text-white shadow-sm' 
+                      : 'bg-[#F9F8F6] text-[#A8A099] hover:bg-[#E5EFE4] hover:text-[#7D9A7A]'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="space-y-6">
             {/* Pending Tasks */}
@@ -849,13 +994,31 @@ export default function App() {
                         }`}
                         onClick={() => handleSelectTask(task.id)}
                       >
-                        <div className="flex flex-col">
+                        <div className="flex flex-col flex-1">
                           <span className={`font-medium ${activeTaskId === task.id ? 'text-[#6F4E37]' : 'text-[#4A4A4A]'}`}>
                             {task.title}
                           </span>
-                          <span className="text-xs text-[#A8A099] font-mono mt-1 inline-flex items-center gap-1">
-                            {formatTimeSmall(task.timeSpent)} {task.estimatedTime > 0 && <><span className="mx-0.5">/</span> {formatTimeSmall(task.estimatedTime)}</>} <span className="ml-1 tracking-wider uppercase text-[9px]">spent</span>
-                          </span>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            <span className="text-[10px] text-[#A8A099] font-mono inline-flex items-center gap-1 bg-[#F9F8F6] px-1.5 py-0.5 rounded-md">
+                              {formatTimeSmall(task.timeSpent)} {task.estimatedTime > 0 && <><span className="mx-0.5">/</span> {formatTimeSmall(task.estimatedTime)}</>}
+                            </span>
+                            {task.tags?.map(tag => (
+                              <span key={tag} className="text-[9px] font-bold uppercase tracking-wider bg-[#E5EFE4] text-[#7D9A7A] px-1.5 py-0.5 rounded-md">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                          {task.estimatedTime > 0 && (
+                            <div className="w-full h-1 bg-[#F9F8F6] rounded-full mt-2.5 overflow-hidden">
+                              <motion.div 
+                                initial={{ width: 0 }}
+                                animate={{ width: `${Math.min(100, (task.timeSpent / task.estimatedTime) * 100)}%` }}
+                                className={`h-full transition-all duration-500 rounded-full ${
+                                  activeTaskId === task.id ? 'bg-[#7D9A7A]' : 'bg-[#A8A099]/30'
+                                }`}
+                              />
+                            </div>
+                          )}
                         </div>
                         {activeTaskId !== task.id && (
                           <button
@@ -884,12 +1047,23 @@ export default function App() {
                 </div>
                 <ul className="space-y-2 opacity-60 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                   {completedTasks.map(task => (
-                    <li key={task.id} className="flex items-center justify-between p-4 rounded-2xl bg-[#F9F8F6] border border-transparent">
-                      <span className="line-through text-[#8B7E74]">{task.title}</span>
-                      <div className="flex items-center gap-3">
-                         <span className="text-[10px] text-[#A8A099] uppercase tracking-widest">{Math.max(0, Math.ceil(task.timeSpent / 60))} crumbs</span>
-                         <span className="text-xs text-[#A8A099] font-mono inline-flex items-center">{formatTimeSmall(task.timeSpent)}</span>
+                    <li key={task.id} className="flex flex-col gap-2 p-4 rounded-2xl bg-[#F9F8F6] border border-transparent">
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="line-through text-[#8B7E74] flex-1">{task.title}</span>
+                        <div className="flex items-center gap-3">
+                           <span className="text-[10px] text-[#A8A099] uppercase tracking-widest">{Math.max(0, Math.ceil(task.timeSpent / 60))} crumbs</span>
+                           <span className="text-xs text-[#A8A099] font-mono inline-flex items-center">{formatTimeSmall(task.timeSpent)}</span>
+                        </div>
                       </div>
+                      {task.tags && task.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {task.tags.map(tag => (
+                            <span key={tag} className="text-[8px] font-bold uppercase tracking-wider bg-white/50 text-[#A8A099] px-1.5 py-0.5 rounded-md">
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -1011,6 +1185,74 @@ export default function App() {
                 >
                   Amen
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showShop && userProfile && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ y: "100%", opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: "100%", opacity: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden flex flex-col border border-[#E5EFE4] relative"
+            >
+              <div className="p-6 border-b border-[#E5EFE4] flex items-center justify-between sticky top-0 bg-white z-10 shrink-0">
+                <div className="flex items-center gap-2">
+                  <Leaf className="w-6 h-6 text-[#7D9A7A]" />
+                  <h3 className="font-serif text-2xl text-[#6F4E37]">Theme Shop</h3>
+                </div>
+                <div className="flex items-center gap-4">
+                  <span className="font-bold text-[#7D9A7A]">{userProfile.leaves || 0} 🍃</span>
+                  <button 
+                    onClick={() => setShowShop(false)}
+                    className="text-[#A8A099] hover:text-[#4A4A4A] bg-[#F9F8F6] rounded-full p-2 transition-colors border border-[#E5EFE4]"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="p-6 overflow-y-auto custom-scrollbar space-y-4 max-h-[60vh]">
+                {THEMES.map((theme) => {
+                  const isUnlocked = userProfile.unlockedThemes?.includes(theme.id);
+                  const isCurrent = userProfile.currentTheme === theme.id;
+                  
+                  return (
+                    <div key={theme.id} className={`p-4 rounded-2xl flex items-center justify-between border shadow-sm transition-all ${isCurrent ? 'border-[#7D9A7A] bg-[#F4F9F4]' : 'border-[#E5EFE4] bg-[#F9F8F6] hover:border-[#D4A373]'}`}>
+                      <div className="flex items-center gap-4">
+                        <div className={`w-10 h-10 rounded-full border border-gray-200 shadow-inner ${theme.color}`}></div>
+                        <div>
+                           <p className="font-bold text-[#6F4E37] block">{theme.name}</p>
+                           {!isUnlocked && (
+                             <p className="text-xs text-[#A8A099] font-mono mt-1">{theme.cost} 🍃</p>
+                           )}
+                        </div>
+                      </div>
+                      
+                      <button
+                        disabled={isCurrent || (!isUnlocked && userProfile.leaves < theme.cost)}
+                        onClick={() => handleUnlockTheme(theme.id, theme.cost)}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors ${
+                          isCurrent ? 'bg-[#E5EFE4] text-[#A8A099] cursor-not-allowed' : 
+                          isUnlocked ? 'bg-[#7D9A7A] hover:bg-[#688265] text-white shadow-md' : 
+                          userProfile.leaves >= theme.cost ? 'bg-[#D4A373] hover:bg-[#C29367] text-white shadow-md' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        {isCurrent ? 'Equipped' : isUnlocked ? 'Equip' : `Unlock`}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </motion.div>
           </motion.div>

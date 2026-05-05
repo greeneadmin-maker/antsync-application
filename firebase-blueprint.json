@@ -7,10 +7,15 @@
       "properties": {
         "userId": { "type": "string" },
         "totalFood": { "type": "number" },
+        "leaves": { "type": "number" },
+        "streak": { "type": "number" },
+        "lastTaskDate": { "type": "string" },
+        "unlockedThemes": { "type": "array", "items": { "type": "string" } },
+        "currentTheme": { "type": "string" },
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" }
       },
-      "required": ["userId", "totalFood", "createdAt", "updatedAt"]
+      "required": ["userId", "totalFood", "leaves", "streak", "unlockedThemes", "currentTheme", "createdAt", "updatedAt"]
     },
     "task": {
       "title": "Task",
@@ -19,6 +24,7 @@
       "properties": {
         "userId": { "type": "string" },
         "title": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
         "timeSpent": { "type": "number" },
         "estimatedTime": { "type": "number" },
         "isCompleted": { "type": "boolean" },
