@@ -26,6 +26,26 @@
         "updatedAt": { "type": "number" }
       },
       "required": ["userId", "title", "timeSpent", "isCompleted", "createdAt", "updatedAt"]
+    },
+    "feedback": {
+      "title": "Feedback",
+      "description": "User feedback submission.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "rating": { "type": "number" },
+        "useCase": { "type": "string" },
+        "bestFeature": { "type": "string" },
+        "painPoint": { "type": "string" },
+        "zenModeFeedback": { "type": "string" },
+        "themeFeedback": { "type": "string" },
+        "desiredFeatures": { "type": "string" },
+        "dailyUseFactor": { "type": "string" },
+        "bugs": { "type": "string" },
+        "additionalComments": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "rating", "useCase", "bestFeature", "painPoint", "zenModeFeedback", "themeFeedback", "desiredFeatures", "dailyUseFactor", "bugs", "additionalComments", "createdAt"]
     }
   },
   "firestore": {
@@ -36,6 +56,10 @@
     "/users/{userId}/tasks/{taskId}": {
       "schema": { "$ref": "#/entities/task" },
       "description": "Tasks created by users"
+    },
+    "/feedback/{feedbackId}": {
+      "schema": { "$ref": "#/entities/feedback" },
+      "description": "User feedback submissions"
     }
   }
 }

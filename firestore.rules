@@ -62,6 +62,23 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidFeedback(data) {
+      return data.keys().hasAll(['userId', 'rating', 'useCase', 'bestFeature', 'painPoint', 'zenModeFeedback', 'themeFeedback', 'desiredFeatures', 'dailyUseFactor', 'bugs', 'additionalComments', 'createdAt'])
+        && data.keys().size() == 12
+        && data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid
+        && data.rating is number && data.rating >= 1 && data.rating <= 5
+        && data.useCase is string && data.useCase.size() <= 5000
+        && data.bestFeature is string && data.bestFeature.size() <= 5000
+        && data.painPoint is string && data.painPoint.size() <= 5000
+        && data.zenModeFeedback is string && data.zenModeFeedback.size() <= 5000
+        && data.themeFeedback is string && data.themeFeedback.size() <= 5000
+        && data.desiredFeatures is string && data.desiredFeatures.size() <= 5000
+        && data.dailyUseFactor is string && data.dailyUseFactor.size() <= 5000
+        && data.bugs is string && data.bugs.size() <= 5000
+        && data.additionalComments is string && data.additionalComments.size() <= 5000
+        && data.createdAt is timestamp;
+    }
+
     match /users/{userId} {
       allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
       allow create: if isSignedIn() 
@@ -107,6 +124,13 @@ service cloud.firestore {
             (incoming().diff(existing()).affectedKeys().hasOnly(['isCompleted', 'timeSpent', 'updatedAt']))
           );
       }
+    }
+
+    match /feedback/{feedbackId} {
+      allow create: if isSignedIn()
+        && isValidId(feedbackId)
+        && isValidFeedback(incoming())
+        && incoming().createdAt == request.time;
     }
   }
 }

@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Pause, Check, Plus, Leaf, Clock, X, Quote, LogIn, LogOut, Bug } from 'lucide-react';
+import { Play, Pause, Check, Plus, Leaf, Clock, X, Quote, LogIn, LogOut, Bug, Maximize2, Minimize2, Medal, Target, Shield, Crown, MessageSquare, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, User as FirebaseUser } from 'firebase/auth';
-import { collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, getDoc, getDocFromServer } from 'firebase/firestore';
+import { collection, doc, setDoc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, getDoc, getDocFromServer, addDoc } from 'firebase/firestore';
 
 // --- DATA ARCHITECTURE ---
 
@@ -15,6 +15,7 @@ interface Task {
   estimatedTime: number; // in seconds
   isCompleted: boolean;
   createdAt: number;
+  updatedAt: number;
 }
 
 interface UserProfile {
@@ -79,6 +80,24 @@ export default function App() {
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showInstallDialog, setShowInstallDialog] = useState(false);
+  const [isZenMode, setIsZenMode] = useState(false);
+
+  // Feedback State
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackForm, setFeedbackForm] = useState({
+    rating: 5,
+    useCase: '',
+    bestFeature: '',
+    painPoint: '',
+    zenModeFeedback: '',
+    themeFeedback: '',
+    desiredFeatures: '',
+    dailyUseFactor: '',
+    bugs: '',
+    additionalComments: ''
+  });
+  const [submittingFeedback, setSubmittingFeedback] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
   // Install Prompt event listener
   useEffect(() => {
@@ -109,6 +128,42 @@ export default function App() {
       }
     } else {
       setShowInstallDialog(true);
+    }
+  };
+
+  const handleFeedbackSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    
+    setSubmittingFeedback(true);
+    try {
+      await addDoc(collection(db, 'feedback'), {
+        userId: user.uid,
+        ...feedbackForm,
+        createdAt: serverTimestamp()
+      });
+      setFeedbackSuccess(true);
+      setTimeout(() => {
+        setShowFeedback(false);
+        setFeedbackSuccess(false);
+        setFeedbackForm({
+          rating: 5,
+          useCase: '',
+          bestFeature: '',
+          painPoint: '',
+          zenModeFeedback: '',
+          themeFeedback: '',
+          desiredFeatures: '',
+          dailyUseFactor: '',
+          bugs: '',
+          additionalComments: ''
+        });
+      }, 3000);
+    } catch (error) {
+      console.error("Error submitting feedback:", error);
+      alert("Failed to submit feedback. Please try again.");
+    } finally {
+      setSubmittingFeedback(false);
     }
   };
 
@@ -177,6 +232,7 @@ export default function App() {
                 estimatedTime: data.estimatedTime || 0,
                 isCompleted: data.isCompleted,
                 createdAt: data.createdAt?.toMillis() || Date.now(),
+                updatedAt: data.updatedAt?.toMillis() || Date.now(),
               });
             });
             setTasks(fetchedTasks);
@@ -248,6 +304,9 @@ export default function App() {
     try {
       await signInWithPopup(auth, provider);
     } catch (error: any) {
+      if (error.code === 'auth/popup-closed-by-user') {
+        return;
+      }
       console.error("Login failed", error);
       let message = error.message;
       if (error.code === 'auth/unauthorized-domain') {
@@ -439,18 +498,45 @@ export default function App() {
     );
   };
 
-  if (loading) {
-     return <div className="min-h-screen flex items-center justify-center bg-[#F9F8F6] text-[#7D9A7A]"><Leaf className="w-8 h-8 animate-pulse" /></div>;
-  }
-
   const activeTask = tasks.find(t => t.id === activeTaskId);
   const pendingTasks = tasks.filter(t => !t.isCompleted);
   const completedTasks = tasks.filter(t => t.isCompleted);
+
+  const getColonyRank = (crumbs: number) => {
+    if (crumbs < 50) return 'Lone Forager';
+    if (crumbs < 150) return 'Scout Ant';
+    if (crumbs < 350) return 'Worker Ant';
+    if (crumbs < 700) return 'Soldier Ant';
+    if (crumbs < 1200) return 'Queen\'s Guard';
+    return 'Colony Builder';
+  };
+
+  const getRankIcon = (crumbs: number) => {
+    if (crumbs < 50) return <Leaf className="w-5 h-5 text-[#8B7E74]" />;
+    if (crumbs < 150) return <Target className="w-5 h-5 text-[#7D9A7A]" />;
+    if (crumbs < 350) return <Bug className="w-5 h-5 text-[#6F4E37]" />;
+    if (crumbs < 700) return <Shield className="w-5 h-5 text-[#D4A373]" />;
+    if (crumbs < 1200) return <Medal className="w-5 h-5 text-[#E5D3B3]" />;
+    return <Crown className="w-5 h-5 text-[#F5E6CC]" />;
+  };
+
+  const getDailyCrumbs = () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return completedTasks
+      .filter(t => t.updatedAt >= today.getTime())
+      .reduce((acc, task) => acc + Math.max(0, Math.ceil(task.timeSpent / 60)), 0);
+  };
+
+  if (loading) {
+     return <div className="min-h-screen flex items-center justify-center bg-[#F9F8F6] text-[#7D9A7A]"><Leaf className="w-8 h-8 animate-pulse" /></div>;
+  }
 
   return (
     <div className="min-h-screen font-sans flex flex-col items-center py-12 px-4 selection:bg-[#7D9A7A] selection:text-white">
       
       {/* Header */}
+      {!isZenMode && (
       <header className="mb-10 w-full max-w-xl flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-3 w-full sm:w-auto justify-center sm:justify-start">
           <Leaf className="w-8 h-8 text-[#7D9A7A]" />
@@ -486,25 +572,29 @@ export default function App() {
           )}
         </div>
       </header>
+      )}
 
       {user ? (
-      <main className="w-full max-w-xl flex flex-col gap-8 relative">
+      <main className={`w-full max-w-xl flex flex-col gap-8 relative ${isZenMode ? 'flex-1 justify-center' : ''}`}>
         
         {/* Active Timer Section */}
         <AnimatePresence mode="popLayout">
           {activeTask && !activeTask.isCompleted && (
             <motion.div
+              layout
               initial={{ opacity: 0, y: -20, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white rounded-3xl p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-[#E5EFE4] text-center"
+              className={`bg-white/95 backdrop-blur-md rounded-3xl p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-[#E5EFE4] text-center transition-all duration-500 z-[60] ${
+                isZenMode ? 'fixed inset-0 flex flex-col justify-center items-center w-full h-full rounded-none md:p-24' : ''
+              }`}
             >
-              <h2 className="text-[#6F4E37] font-serif text-2xl mb-1">{activeTask.title}</h2>
-              <p className="text-[#8B7E74] text-sm mb-6 flex items-center justify-center gap-1">
+              <h2 className={`text-[#6F4E37] font-serif mb-1 transition-all ${isZenMode ? 'text-4xl md:text-6xl mb-4' : 'text-2xl'}`}>{activeTask.title}</h2>
+              <p className={`text-[#8B7E74] mb-6 flex items-center justify-center gap-2 transition-all ${isZenMode ? 'text-lg mb-12' : 'text-sm'}`}>
                 <Clock className="w-4 h-4" /> actively tending
               </p>
               
-              <div className="text-6xl font-sans font-semibold text-[#4A4A4A] tracking-tight mb-6">
+              <div className={`font-sans font-semibold text-[#4A4A4A] tracking-tight mb-6 transition-all ${isZenMode ? 'text-8xl md:text-9xl mb-16' : 'text-6xl'}`}>
                 {activeTask.estimatedTime > 0 ? (
                   activeTask.timeSpent > activeTask.estimatedTime ? (
                     <span className="text-[#D4A373] flex items-center justify-center">
@@ -571,6 +661,14 @@ export default function App() {
                 >
                   <Check className="w-6 h-6 stroke-[3]" />
                 </button>
+
+                <button
+                  onClick={() => setIsZenMode(!isZenMode)}
+                  className={`flex items-center justify-center w-12 h-12 rounded-full border border-[#E5EFE4] transition-all duration-300 ml-2 ${isZenMode ? 'bg-[#7D9A7A] text-white' : 'text-[#A8A099] hover:bg-[#F9F8F6] hover:text-[#7D9A7A]'}`}
+                  title="Zen Focus Mode"
+                >
+                  {isZenMode ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+                </button>
               </div>
             </motion.div>
           )}
@@ -578,21 +676,57 @@ export default function App() {
 
         {/* The Anthill (Stats) */}
         {userProfile && (
-          <div className="bg-[#6F4E37] text-[#FDF4E3] rounded-3xl p-6 shadow-lg relative overflow-hidden">
+          <div className="bg-[#6F4E37] text-[#FDF4E3] rounded-3xl p-6 sm:p-8 shadow-lg relative overflow-hidden flex flex-col gap-6">
              <div className="absolute -bottom-4 -right-4 opacity-10">
-               <Bug className="w-32 h-32" />
+               <Bug className="w-48 h-48 sm:w-64 sm:h-64" />
              </div>
-             <div className="relative z-10 flex items-center justify-between">
-                <div>
-                  <h3 className="text-xs uppercase tracking-widest text-[#D4AA7D] font-bold mb-1">The Anthill</h3>
-                  <p className="text-sm text-[#E5D3B3] max-w-[200px] leading-relaxed">
-                    Hard work brings a harvest. Time spent translates to food stored.
+             
+             <div className="relative z-10 flex flex-col sm:flex-row items-center justify-between gap-6">
+                <div className="flex-1 text-center sm:text-left">
+                  <h3 className="text-xs uppercase tracking-widest text-[#D4AA7D] font-bold mb-2">Colony Status</h3>
+                  <div className="flex items-center justify-center sm:justify-start gap-3 mb-2">
+                    <div className="bg-[#5A3F2C] p-2.5 rounded-xl border border-[#7A5A43]">
+                      {getRankIcon(userProfile.totalFood)}
+                    </div>
+                    <div className="text-2xl font-serif text-[#FDF4E3]">
+                      {getColonyRank(userProfile.totalFood)}
+                    </div>
+                  </div>
+                  <p className="text-sm text-[#E5D3B3] leading-relaxed">
+                    Hard work brings a harvest. Your dedication makes the colony stronger.
                   </p>
                 </div>
-                <div className="text-center bg-[#5A3F2C] p-4 rounded-2xl border border-[#7A5A43]">
-                   <div className="text-3xl font-serif text-[#FDF4E3] mb-1">{userProfile.totalFood}</div>
-                   <div className="text-[10px] uppercase font-bold text-[#D4AA7D] tracking-widest">Crumbs</div>
+                
+                <div className="flex gap-4 w-full sm:w-auto">
+                  <div className="flex-1 sm:flex-none text-center bg-[#5A3F2C] p-4 rounded-2xl border border-[#7A5A43] min-w-[100px]">
+                     <div className="text-3xl font-serif text-[#FDF4E3] mb-1">{userProfile.totalFood}</div>
+                     <div className="text-[10px] uppercase font-bold text-[#D4AA7D] tracking-widest">Total Crumbs</div>
+                  </div>
+                  <div className="flex-1 sm:flex-none text-center bg-[#5A3F2C]/50 p-4 rounded-2xl border border-[#7A5A43]/50 min-w-[100px] relative overflow-hidden">
+                     {/* Daily progress background fill */}
+                     <div 
+                       className="absolute bottom-0 left-0 w-full bg-[#7D9A7A]/20 transition-all duration-1000 ease-out"
+                       style={{ height: `${Math.min(100, (getDailyCrumbs() / 50) * 100)}%` }}
+                     />
+                     <div className="relative z-10">
+                       <div className="text-3xl font-serif text-[#FDF4E3] mb-1">{getDailyCrumbs()}</div>
+                       <div className="text-[10px] uppercase font-bold text-[#D4AA7D] tracking-widest">Today's Crumbs</div>
+                     </div>
+                  </div>
                 </div>
+             </div>
+
+             <div className="relative z-10 bg-[#5A3F2C]/30 rounded-xl p-4 border border-[#7A5A43]/30">
+               <div className="flex justify-between text-[10px] uppercase font-bold text-[#D4AA7D] tracking-widest mb-2">
+                 <span>Daily Foraging Goal</span>
+                 <span>{Math.min(50, getDailyCrumbs())} / 50</span>
+               </div>
+               <div className="h-2 bg-[#5A3F2C] rounded-full overflow-hidden">
+                 <div 
+                   className="h-full bg-[#D4AA7D] rounded-full transition-all duration-1000 ease-out" 
+                   style={{ width: `${Math.min(100, (getDailyCrumbs() / 50) * 100)}%` }}
+                 />
+               </div>
              </div>
           </div>
         )}
@@ -820,6 +954,191 @@ export default function App() {
       </AnimatePresence>
 
       <AnimatePresence>
+        {showFeedback && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ y: "100%", opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: "100%", opacity: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="bg-[#FDF4E3] rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col border border-[#E5D3B3] relative"
+            >
+              <div className="p-6 border-b border-[#E5D3B3] flex items-center justify-between sticky top-0 bg-[#FDF4E3] z-10 shrink-0">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-[#6F4E37]" />
+                  <h3 className="font-serif text-2xl text-[#6F4E37]">Feedback</h3>
+                </div>
+                <button 
+                  onClick={() => setShowFeedback(false)}
+                  className="text-[#A8A099] hover:text-[#4A4A4A] bg-[#F9F8F6] rounded-full p-2 transition-colors border border-[#E5EFE4]"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto custom-scrollbar text-sm space-y-6">
+                {feedbackSuccess ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center h-full">
+                    <div className="w-16 h-16 bg-[#7D9A7A] rounded-full flex items-center justify-center mb-4">
+                      <Check className="w-8 h-8 text-white" />
+                    </div>
+                    <h4 className="text-2xl font-serif text-[#6F4E37] mb-2">Thank You!</h4>
+                    <p className="text-[#8B7E74]">Your feedback helps the colony grow stronger.</p>
+                  </div>
+                ) : (
+                  <form id="feedback-form" onSubmit={handleFeedbackSubmit} className="space-y-6 flex-1 text-[#4A4A4A]">
+                    {/* 1. Rating */}
+                    <div className="space-y-3">
+                      <label className="block font-medium text-[#6F4E37] text-base">1. How would you rate your overall experience with AntSync?</label>
+                      <div className="flex items-center gap-2">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <button
+                            key={star}
+                            type="button"
+                            onClick={() => setFeedbackForm({...feedbackForm, rating: star})}
+                            className={`p-2 rounded-xl transition-all ${feedbackForm.rating >= star ? 'text-[#D4A373]' : 'text-[#A8A099] opacity-50'}`}
+                          >
+                            <Star className={`w-8 h-8 ${feedbackForm.rating >= star ? 'fill-current' : ''}`} />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    {/* 2. Use Case */}
+                    <div className="space-y-2">
+                      <label className="block font-medium text-[#6F4E37]">2. What do you primarily use AntSync for?</label>
+                      <input 
+                        type="text" 
+                        value={feedbackForm.useCase}
+                        onChange={(e) => setFeedbackForm({...feedbackForm, useCase: e.target.value})}
+                        className="w-full bg-white border border-[#E5EFE4] rounded-xl px-4 py-3 outline-none focus:border-[#7D9A7A] transition-colors focus:ring-2 focus:ring-[#7D9A7A]/20"
+                        placeholder="e.g., studying, coding, reading..."
+                      />
+                    </div>
+                    
+                    {/* 3. Best Feature */}
+                    <div className="space-y-2">
+                      <label className="block font-medium text-[#6F4E37]">3. What is your favorite feature?</label>
+                      <input 
+                        type="text" 
+                        value={feedbackForm.bestFeature}
+                        onChange={(e) => setFeedbackForm({...feedbackForm, bestFeature: e.target.value})}
+                        className="w-full bg-white border border-[#E5EFE4] rounded-xl px-4 py-3 outline-none focus:border-[#7D9A7A] transition-colors focus:ring-2 focus:ring-[#7D9A7A]/20"
+                        placeholder="What do you like the most?"
+                      />
+                    </div>
+                    
+                    {/* 4. Pain Point */}
+                    <div className="space-y-2">
+                      <label className="block font-medium text-[#6F4E37]">4. What's the biggest pain point or challenge you've faced?</label>
+                      <textarea 
+                        value={feedbackForm.painPoint}
+                        onChange={(e) => setFeedbackForm({...feedbackForm, painPoint: e.target.value})}
+                        rows={2}
+                        className="w-full bg-white border border-[#E5EFE4] rounded-xl px-4 py-3 outline-none focus:border-[#7D9A7A] transition-colors focus:ring-2 focus:ring-[#7D9A7A]/20 resize-none"
+                        placeholder="Tell us what's frustrating..."
+                      />
+                    </div>
+                    
+                    {/* 5. Zen Mode */}
+                    <div className="space-y-2">
+                      <label className="block font-medium text-[#6F4E37]">5. Have you tried "Zen Mode"? How useful is it to you?</label>
+                      <input 
+                        type="text" 
+                        value={feedbackForm.zenModeFeedback}
+                        onChange={(e) => setFeedbackForm({...feedbackForm, zenModeFeedback: e.target.value})}
+                        className="w-full bg-white border border-[#E5EFE4] rounded-xl px-4 py-3 outline-none focus:border-[#7D9A7A] transition-colors focus:ring-2 focus:ring-[#7D9A7A]/20"
+                        placeholder="Your thoughts on full-screen focus..."
+                      />
+                    </div>
+                    
+                    {/* 6. Theme Feedback */}
+                    <div className="space-y-2">
+                      <label className="block font-medium text-[#6F4E37]">6. How do you like the overall Ant / Colony theme?</label>
+                      <input 
+                        type="text" 
+                        value={feedbackForm.themeFeedback}
+                        onChange={(e) => setFeedbackForm({...feedbackForm, themeFeedback: e.target.value})}
+                        className="w-full bg-white border border-[#E5EFE4] rounded-xl px-4 py-3 outline-none focus:border-[#7D9A7A] transition-colors focus:ring-2 focus:ring-[#7D9A7A]/20"
+                        placeholder="Suggestions for the ant theme..."
+                      />
+                    </div>
+                    
+                    {/* 7. Desired Features */}
+                    <div className="space-y-2">
+                      <label className="block font-medium text-[#6F4E37]">7. What is one feature you wish AntSync had?</label>
+                      <textarea 
+                        value={feedbackForm.desiredFeatures}
+                        onChange={(e) => setFeedbackForm({...feedbackForm, desiredFeatures: e.target.value})}
+                        rows={2}
+                        className="w-full bg-white border border-[#E5EFE4] rounded-xl px-4 py-3 outline-none focus:border-[#7D9A7A] transition-colors focus:ring-2 focus:ring-[#7D9A7A]/20 resize-none"
+                        placeholder="Share your ideas..."
+                      />
+                    </div>
+                    
+                    {/* 8. Daily Use Factor */}
+                    <div className="space-y-2">
+                      <label className="block font-medium text-[#6F4E37]">8. What would make you use this app every single day?</label>
+                      <input 
+                        type="text" 
+                        value={feedbackForm.dailyUseFactor}
+                        onChange={(e) => setFeedbackForm({...feedbackForm, dailyUseFactor: e.target.value})}
+                        className="w-full bg-white border border-[#E5EFE4] rounded-xl px-4 py-3 outline-none focus:border-[#7D9A7A] transition-colors focus:ring-2 focus:ring-[#7D9A7A]/20"
+                        placeholder="The specific feature or tweak..."
+                      />
+                    </div>
+                    
+                    {/* 9. Bugs */}
+                    <div className="space-y-2">
+                      <label className="block font-medium text-[#6F4E37]">9. Did you encounter any bugs? If so, please specify.</label>
+                      <textarea 
+                        value={feedbackForm.bugs}
+                        onChange={(e) => setFeedbackForm({...feedbackForm, bugs: e.target.value})}
+                        rows={2}
+                        className="w-full bg-white border border-[#E5EFE4] rounded-xl px-4 py-3 outline-none focus:border-[#7D9A7A] transition-colors focus:ring-2 focus:ring-[#7D9A7A]/20 resize-none"
+                        placeholder="Bugs, glitches, errors..."
+                      />
+                    </div>
+                    
+                    {/* 10. Additional Comments */}
+                    <div className="space-y-2">
+                      <label className="block font-medium text-[#6F4E37]">10. Any additional comments or suggestions?</label>
+                      <textarea 
+                        value={feedbackForm.additionalComments}
+                        onChange={(e) => setFeedbackForm({...feedbackForm, additionalComments: e.target.value})}
+                        rows={3}
+                        className="w-full bg-white border border-[#E5EFE4] rounded-xl px-4 py-3 outline-none focus:border-[#7D9A7A] transition-colors focus:ring-2 focus:ring-[#7D9A7A]/20 resize-none"
+                        placeholder="Anything else on your mind?"
+                      />
+                    </div>
+
+                  </form>
+                )}
+              </div>
+              
+              {!feedbackSuccess && (
+                <div className="p-6 border-t border-[#E5D3B3] bg-[#F9F8F6] shrink-0">
+                  <button
+                    form="feedback-form"
+                    type="submit"
+                    disabled={submittingFeedback}
+                    className="w-full py-4 bg-[#7D9A7A] hover:bg-[#688265] text-white rounded-xl font-medium transition-all shadow shadow-[#7D9A7A]/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 uppercase tracking-widest text-sm"
+                  >
+                    {submittingFeedback ? 'Submitting...' : 'Submit Feedback'}
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {showInstallDialog && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -889,6 +1208,17 @@ export default function App() {
 
       <footer className="mt-auto pt-8 pb-4 w-full text-center flex flex-col items-center justify-center opacity-70 relative">
         <CrawlingAnts />
+        
+        {user && (
+          <button
+            onClick={() => setShowFeedback(true)}
+            className="flex items-center gap-2 mb-4 text-[#8B7E74] hover:text-[#7D9A7A] transition-colors text-xs font-medium bg-[#F9F8F6] border border-[#E5EFE4] px-4 py-2 rounded-full cursor-pointer z-10"
+          >
+            <MessageSquare className="w-4 h-4" />
+            Send Feedback
+          </button>
+        )}
+
         <div className="mt-4">
           <p className="text-xs font-medium tracking-wide text-[#8B7E74]">Coded and Developed by siejeihyung.digital</p>
           <p className="text-[10px] uppercase tracking-widest text-[#A8A099] mt-1 hover:text-[#7D9A7A] transition-colors">All Rights Reserved</p>
