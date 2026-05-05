@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Pause, Check, Plus, Leaf, Clock, X, Quote, LogIn, LogOut, Bug, Maximize2, Minimize2, Medal, Target, Shield, Crown, MessageSquare, Star } from 'lucide-react';
+import { Play, Pause, Check, Plus, Leaf, Clock, X, Quote, LogIn, LogOut, Bug, Maximize2, Minimize2, Medal, Target, Shield, Crown, MessageSquare, Star, Gift } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, User as FirebaseUser } from 'firebase/auth';
@@ -82,6 +82,13 @@ export default function App() {
   const [showInstallDialog, setShowInstallDialog] = useState(false);
   const [isZenMode, setIsZenMode] = useState(false);
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
+  };
+
   // Feedback State
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackForm, setFeedbackForm] = useState({
@@ -98,6 +105,13 @@ export default function App() {
   });
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
+  const [lastFeedbackId, setLastFeedbackId] = useState<string | null>(null);
+
+  // Reward State
+  const [showRewardModal, setShowRewardModal] = useState(false);
+  const [canvaEmail, setCanvaEmail] = useState('');
+  const [submittingReward, setSubmittingReward] = useState(false);
+  const [rewardSuccess, setRewardSuccess] = useState(false);
 
   // Install Prompt event listener
   useEffect(() => {
@@ -137,15 +151,19 @@ export default function App() {
     
     setSubmittingFeedback(true);
     try {
-      await addDoc(collection(db, 'feedback'), {
+      const docRef = await addDoc(collection(db, 'feedback'), {
         userId: user.uid,
         ...feedbackForm,
         createdAt: serverTimestamp()
       });
+      setLastFeedbackId(docRef.id);
       setFeedbackSuccess(true);
+      
+      // After 2 seconds, show the reward modal
       setTimeout(() => {
         setShowFeedback(false);
         setFeedbackSuccess(false);
+        setShowRewardModal(true);
         setFeedbackForm({
           rating: 5,
           useCase: '',
@@ -158,12 +176,38 @@ export default function App() {
           bugs: '',
           additionalComments: ''
         });
-      }, 3000);
+      }, 2000);
     } catch (error) {
       console.error("Error submitting feedback:", error);
       alert("Failed to submit feedback. Please try again.");
     } finally {
       setSubmittingFeedback(false);
+    }
+  };
+
+  const handleClaimReward = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !lastFeedbackId || !canvaEmail) return;
+
+    setSubmittingReward(true);
+    try {
+      await addDoc(collection(db, 'rewards'), {
+        userId: user.uid,
+        feedbackId: lastFeedbackId,
+        canvaEmail: canvaEmail,
+        createdAt: serverTimestamp()
+      });
+      setRewardSuccess(true);
+      setTimeout(() => {
+        setShowRewardModal(false);
+        setRewardSuccess(false);
+        setCanvaEmail('');
+      }, 3000);
+    } catch (error) {
+      console.error("Error claiming reward:", error);
+      alert("Failed to claim reward. Please try again.");
+    } finally {
+      setSubmittingReward(false);
     }
   };
 
@@ -538,12 +582,31 @@ export default function App() {
       {/* Header */}
       {!isZenMode && (
       <header className="mb-10 w-full max-w-xl flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-3 w-full sm:w-auto justify-center sm:justify-start">
-          <Leaf className="w-8 h-8 text-[#7D9A7A]" />
-          <div>
-            <h1 className="text-3xl font-serif text-[#6F4E37] tracking-tight text-center sm:text-left">AntSync</h1>
-            <p className="text-[#8B7E74] text-xs font-medium tracking-widest uppercase text-center sm:text-left">Grow at your own pace</p>
+        <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
+          <div className="flex items-center gap-3 justify-center sm:justify-start">
+            <Leaf className="w-8 h-8 text-[#7D9A7A]" />
+            <div>
+              <h1 className="text-3xl font-serif text-[#6F4E37] tracking-tight text-center sm:text-left">AntSync</h1>
+              <p className="text-[#8B7E74] text-[10px] font-bold tracking-[0.2em] uppercase text-center sm:text-left">Grow Together</p>
+            </div>
           </div>
+          
+          {user && (
+            <div className="h-8 w-[1px] bg-[#E5EFE4] hidden sm:block"></div>
+          )}
+
+          {user && (
+            <motion.div 
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="text-center sm:text-left"
+            >
+              <h3 className="text-sm font-medium text-[#6F4E37] leading-tight">
+                {getGreeting()}, <span className="text-[#7D9A7A] font-bold">{user.displayName?.split(' ')[0] || 'Forager'}</span>
+              </h3>
+              <p className="text-[10px] text-[#A8A099] font-medium">Welcome back to the colony!</p>
+            </motion.div>
+          )}
         </div>
         
         <div className="flex flex-wrap items-center justify-center gap-3">
@@ -557,11 +620,12 @@ export default function App() {
           )}
 
           {user ? (
-            <div className="flex items-center gap-4 border border-[#E5EFE4] bg-white rounded-full px-4 py-2 shadow-sm">
-              <span className="text-[#8B7E74] text-sm hidden sm:inline-block">
-                {user.email}
-              </span>
-              <button onClick={logout} className="text-[#A8A099] hover:text-[#6F4E37] transition-colors" title="Log out">
+            <div className="flex items-center gap-2 border border-[#E5EFE4] bg-white rounded-full p-2 shadow-sm">
+              <button 
+                onClick={logout} 
+                className="text-[#A8A099] hover:text-red-500 transition-colors p-1" 
+                title="Log out"
+              >
                 <LogOut className="w-4 h-4" />
               </button>
             </div>
@@ -1133,6 +1197,88 @@ export default function App() {
                   </button>
                 </div>
               )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showRewardModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[2rem] p-8 shadow-2xl w-full max-w-md border-4 border-[#7D9A7A] relative overflow-hidden"
+            >
+              {/* Decorative background elements */}
+              <div className="absolute -top-10 -right-10 w-32 h-32 bg-[#E5EFE4] rounded-full blur-3xl opacity-50" />
+              <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-[#D4A373] rounded-full blur-3xl opacity-20" />
+
+              <div className="relative z-10 text-center">
+                <div className="w-20 h-20 bg-[#7D9A7A] rounded-2xl flex items-center justify-center mx-auto mb-6 rotate-3 shadow-lg">
+                  <Gift className="w-10 h-10 text-white" />
+                </div>
+
+                <h3 className="text-3xl font-serif text-[#6F4E37] mb-3 leading-tight">Congratulations!</h3>
+                <p className="text-[#8B7E74] mb-6">
+                  We appreciate your feedback! As a reward, we're giving you a <strong className="text-[#7D9A7A]">free 1 Month Canva Subscription</strong>.
+                </p>
+
+                {rewardSuccess ? (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-[#E5EFE4] p-6 rounded-2xl border border-[#7D9A7A]/30"
+                  >
+                    <Check className="w-8 h-8 text-[#7D9A7A] mx-auto mb-2" />
+                    <p className="text-[#6F4E37] font-medium">Claim request sent!</p>
+                    <p className="text-xs text-[#8B7E74] mt-1">We'll reach out to your Canva email soon.</p>
+                  </motion.div>
+                ) : (
+                  <form onSubmit={handleClaimReward} className="space-y-4">
+                    <div className="text-left">
+                      <label className="block text-xs font-bold text-[#6F4E37] uppercase tracking-widest mb-2 ml-1">
+                        Canva Email Account
+                      </label>
+                      <input 
+                        type="email"
+                        required
+                        value={canvaEmail}
+                        onChange={(e) => setCanvaEmail(e.target.value)}
+                        placeholder="your-email@example.com"
+                        className="w-full bg-[#F9F8F6] border-2 border-[#E5EFE4] rounded-xl px-4 py-4 outline-none focus:border-[#7D9A7A] transition-all"
+                      />
+                    </div>
+                    
+                    <button
+                      type="submit"
+                      disabled={submittingReward}
+                      className="w-full py-4 bg-[#7D9A7A] hover:bg-[#688265] text-white rounded-xl font-bold transition-all shadow-lg shadow-[#7D9A7A]/20 disabled:opacity-50 flex items-center justify-center gap-2 uppercase tracking-widest text-sm"
+                    >
+                      {submittingReward ? 'Processing...' : 'Claim Reward'}
+                    </button>
+
+                    <p className="text-[10px] text-[#A8A099] italic leading-relaxed px-4">
+                      We ensure that your data will not be compromised upon entering your email.
+                    </p>
+                  </form>
+                )}
+
+                {!rewardSuccess && (
+                  <button 
+                    onClick={() => setShowRewardModal(false)}
+                    className="mt-6 text-[#A8A099] hover:text-[#6F4E37] text-xs font-medium underline underline-offset-4"
+                  >
+                    Close without claiming
+                  </button>
+                )}
+              </div>
             </motion.div>
           </motion.div>
         )}

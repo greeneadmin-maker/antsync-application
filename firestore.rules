@@ -79,6 +79,15 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    function isValidReward(data) {
+      return data.keys().hasAll(['userId', 'canvaEmail', 'feedbackId', 'createdAt'])
+        && data.keys().size() == 4
+        && data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid
+        && data.canvaEmail is string && data.canvaEmail.size() <= 256 && data.canvaEmail.matches('^.+@.+$')
+        && data.feedbackId is string && data.feedbackId.size() <= 128
+        && data.createdAt is timestamp;
+    }
+
     match /users/{userId} {
       allow read: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
       allow create: if isSignedIn() 
@@ -130,6 +139,13 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && isValidId(feedbackId)
         && isValidFeedback(incoming())
+        && incoming().createdAt == request.time;
+    }
+
+    match /rewards/{rewardId} {
+      allow create: if isSignedIn()
+        && isValidId(rewardId)
+        && isValidReward(incoming())
         && incoming().createdAt == request.time;
     }
   }

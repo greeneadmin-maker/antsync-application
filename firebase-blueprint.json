@@ -46,6 +46,18 @@
         "createdAt": { "type": "number" }
       },
       "required": ["userId", "rating", "useCase", "bestFeature", "painPoint", "zenModeFeedback", "themeFeedback", "desiredFeatures", "dailyUseFactor", "bugs", "additionalComments", "createdAt"]
+    },
+    "reward": {
+      "title": "Reward",
+      "description": "User claim for Canva subscription reward.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "canvaEmail": { "type": "string", "format": "email" },
+        "feedbackId": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["userId", "canvaEmail", "feedbackId", "createdAt"]
     }
   },
   "firestore": {
@@ -60,6 +72,10 @@
     "/feedback/{feedbackId}": {
       "schema": { "$ref": "#/entities/feedback" },
       "description": "User feedback submissions"
+    },
+    "/rewards/{rewardId}": {
+      "schema": { "$ref": "#/entities/reward" },
+      "description": "Reward claims"
     }
   }
 }
